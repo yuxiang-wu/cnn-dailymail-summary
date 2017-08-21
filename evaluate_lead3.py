@@ -1,16 +1,20 @@
 """ Evaluate performance of Lead-3. """
 import pdb
 import argparse
-from nltk.tokenize import sent_tokenize
 import time
+import re
 
 # Import pythonrouge package
 from pythonrouge import PythonROUGE
 ROUGE_dir = "/qydata/ywubw/download/RELEASE-1.5.5"
+
 # Input data format
-input_tag = "<input>"
-output_tag = "<output>"
-output_sent_sep = "@li"
+url_tag = "<url>"
+document_tag = "<doc>"
+summary_tag = "<summary>"
+paragraph_sep = "</p>"
+sentence_sep = "</s>"
+re_sent_sep = sentence_sep + "|" + paragraph_sep
 
 
 def eval_rouge(in_file):
@@ -25,34 +29,32 @@ def eval_rouge(in_file):
       word_level=False,
       length_limit=False,
       length=75,
-      use_cf=False,
+      use_cf=True,
       cf=95,
       ROUGE_W=False,
       ROUGE_W_Weight=1.2,
       scoring_formula="average",
-      resampling=True,
+      resampling=False,
       samples=1000,
       favor=False,
       p=0.5)
 
   # pdb.set_trace()
-  input_start = len(input_tag)
   num_samples = 0
   summary, reference = [], []
 
   for l in in_file.readlines():
-    input_end = l.find(output_tag)
-    output_start = input_end + len(output_tag)
-    input_str = l[input_start:input_end].strip().decode("utf-8")
-    output_str = l[output_start:].strip().decode("utf-8")
+    doc_start = l.find(document_tag)+ len(document_tag)
+    doc_end = l.find(summary_tag)
+    doc_str = l[doc_start:doc_end].strip()
+    doc_sent_list = re.split(re_sent_sep, doc_str)
 
-    input_sent_list = sent_tokenize(input_str)
-    input_sent_list = [s.encode("utf-8") for s in input_sent_list]
-    output_sent_list = output_str.split(output_sent_sep)
-    output_sent_list = [s.encode("utf-8") for s in output_sent_list]
+    summary_start = doc_end + len(summary_tag)
+    summary_str = l[summary_start:].strip()
+    summary_sent_list = summary_str.split(sentence_sep)
 
-    summary.append([input_sent_list[:3]])
-    reference.append([output_sent_list])
+    summary.append([doc_sent_list[:3]])
+    reference.append([summary_sent_list])
     num_samples += 1
 
   start_time = time.time()

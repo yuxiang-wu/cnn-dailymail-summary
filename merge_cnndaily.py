@@ -2,9 +2,10 @@ import pdb
 import argparse
 from collections import namedtuple
 import cPickle as pkl
-from random import shuffle, sample
+from random import shuffle
 
-DocSummary = namedtuple('DocSummary', 'document summary extract_ids rouge_2')
+DocSummary = namedtuple('DocSummary',
+                        'url document summary extract_ids rouge_2')
 
 
 def merge_labels(cnn_path, dm_path, out_path, use_shuffle):
@@ -27,19 +28,6 @@ def merge_labels(cnn_path, dm_path, out_path, use_shuffle):
   with open(out_path, 'w') as f:
     pkl.dump(merged_dataset, f)
     print "Merged dataset written to %s" % out_path
-
-
-def sample_labels(in_path, out_path, num_samples):
-  with open(in_path, 'r') as f:
-    dataset = pkl.load(f)
-  print "Data size: %d" % len(dataset)
-
-  sampled_dataset = sample(dataset, num_samples)
-  print "Sampled %d data instances." % len(sampled_dataset)
-
-  with open(out_path, 'w') as f:
-    pkl.dump(sampled_dataset, f)
-    print "Sampled dataset written to %s" % out_path
 
 
 if __name__ == "__main__":

@@ -33,10 +33,14 @@ import requests
 import socket
 import pdb
 import cPickle as pkl
+from nltk.tokenize import sent_tokenize
 
 datasets = ['training', 'validation', 'test']
 paragraph_sep = "</p>"
 sentence_sep = "</s>"
+url_tag = "<url>"
+document_tag = "<doc>"
+summary_tag = "<summary>"
 
 # Regular expressions
 wayback_pattern = re.compile(r'web/([^/]*)/')
@@ -423,21 +427,29 @@ def Tokens2Story(tokenized_story):
   paragraph_tokens.append(tokenized_story.tokens[paragraph_starts[-1]:])
 
   # parts = ' '.join(tokenized_story.tokens).split(' @ highlight ')
-  try:
-    hl_idx = [
-        i for i, x in enumerate(paragraph_tokens) if x == ['@', 'highlight']
-    ]
-    content_paragraphs = paragraph_tokens[:hl_idx[0]]
-    highlights_tokens = []
-    for idx in hl_idx:
+  hl_idx = [
+      i for i, x in enumerate(paragraph_tokens) if x == ['@', 'highlight']
+  ]
+  content_paragraphs = paragraph_tokens[:hl_idx[0]]
+  highlights_tokens = []
+  for idx in hl_idx:
+    try:
       highlights_tokens.append(paragraph_tokens[idx + 1])
-  except Exception as e:
-    print "Error found: %s" % e
-    print hl_idx
-    return None
+    except Exception as e:
+      print e, hl_idx
+      # print "\n".join([" ".join(p) for p in paragraph_tokens])
+      break
 
   # Concat the tokens
-  content = paragraph_sep.join([" ".join(p) for p in content_paragraphs])
+  paragraph_str_list = []
+  for p in content_paragraphs:
+    p_str = " ".join(p).strip().decode("utf-8")
+    p_sent_list = sent_tokenize(p_str)
+    p_sent_list = [s.encode("utf-8") for s in p_sent_list]
+    new_p_str = sentence_sep.join(p_sent_list)
+    paragraph_str_list.append(new_p_str)
+    
+  content = paragraph_sep.join(paragraph_str_list)
   highlights = [" ".join(h) for h in highlights_tokens]
 
   return Story(tokenized_story.url, content, highlights)
@@ -453,20 +465,21 @@ def WriteAllStories(story_list, corpus, dataset, output_dir):
     output_dir: The directory to write output files.
   """
 
+  story_list = [s for s in story_list if s]  # ignore Nones
   with open('%s/%s/all.%s.pkl' % (output_dir, corpus, dataset), 'w') as f:
     pkl.dump(story_list, f)
 
   topic_dict = {}
   for story in story_list:
-    if story:
-      topic = ExtractTopic(story.url, corpus)
-      if topic not in topic_dict:
-        topic_dict[topic] = []
+    topic = ExtractTopic(story.url, corpus)
+    if topic not in topic_dict:
+      topic_dict[topic] = []
 
-      story_str = " ".join([
-          '<input>', story.content, '<output>', ' @li '.join(story.highlights)
-      ])
-      topic_dict[topic].append(story_str)
+    story_str = " ".join([
+        url_tag, story.url, document_tag, story.content, summary_tag,
+        sentence_sep.join(story.highlights)
+    ])
+    topic_dict[topic].append(story_str)
 
   all_stories = []
   for topic in topic_dict.keys():

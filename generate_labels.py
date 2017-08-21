@@ -9,38 +9,26 @@ import cPickle as pkl
 import glob
 import numpy
 from random import shuffle, sample
+import re
 
 # Import pythonrouge package
-from pythonrouge.pythonrouge import Pythonrouge
-ROUGE_path = "/qydata/ywubw/download/RELEASE-1.5.5/ROUGE-1.5.5.pl"
-data_path = "/qydata/ywubw/download/RELEASE-1.5.5/data"
-# Input data format
-input_tag = "<input>"
-output_tag = "<output>"
-output_sent_sep = "@li"
+from pythonrouge import PythonROUGE
+ROUGE_path = "/qydata/ywubw/download/RELEASE-1.5.5"
 
-ExtSummary = namedtuple('ExtSummary',
-                        'doc_sents summary_sents selected_ids rouge_2')
-DocSummary = namedtuple('DocSummary', 'document summary extract_ids rouge_2')
+# Input data format
+url_tag = "<url>"
+document_tag = "<doc>"
+summary_tag = "<summary>"
+paragraph_sep = "</p>"
+sentence_sep = "</s>"
+re_sent_sep = sentence_sep + "|" + paragraph_sep
+
+DocSummary = namedtuple('DocSummary',
+                        'url document summary extract_ids rouge_2')
 
 # Use SSD for acceleration
 temp_root = ""
 select_window = 10
-
-
-def pyrouge_eval(summary_sent_list, reference_sent_list, rouge):
-  summary = [summary_sent_list]
-  reference = [[reference_sent_list]]
-
-  setting_file = rouge.setting(
-      files=False, summary=summary, reference=reference, temp_root=temp_root)
-  results = rouge.eval_rouge(
-      setting_file,
-      f_measure_only=True,
-      ROUGE_path=ROUGE_path,
-      data_path=data_path)
-
-  return results['ROUGE-2']
 
 
 def plot_hist(count, title):
@@ -66,7 +54,8 @@ def greedy_selection(doc_sent_list, ref_sent_list, rouge):
             t[1] for t in sorted(current_sents_ids, key=lambda s: s[0])
         ]
 
-        rouge_score = pyrouge_eval(current_sents, ref_sent_list, rouge)
+        rouge_dict = rouge.evaluate([[current_sents]], [[ref_sent_list]], True)
+        rouge_score = rouge_dict["ROUGE-2-F"]
         id_score_list.append((i, rouge_score))
 
         if rouge_score > max_rouge:
@@ -84,19 +73,20 @@ def greedy_selection(doc_sent_list, ref_sent_list, rouge):
         id_score_list, key=lambda x: x[1], reverse=True)[:select_window]
     current_candidates = [t[0] for t in top_ids_scores]
 
-  return (sorted(list(selected)), max_rouge)
+  return sorted(list(selected)), max_rouge
 
 
 def generate_thread(doc_summary_queue, output_queue):
-  rouge = Pythonrouge(
+  rouge = PythonROUGE(
+      ROUGE_path,
       n_gram=2,
       ROUGE_SU4=False,
       ROUGE_L=False,
       stemming=True,
       stopwords=False,
-      word_level=False,
       length_limit=False,
       length=75,
+      word_level=False,
       use_cf=True,
       cf=95,
       ROUGE_W=False,
@@ -108,15 +98,15 @@ def generate_thread(doc_summary_queue, output_queue):
 
   count = 0
   while not doc_summary_queue.empty():
-    doc_sents, ref_sents = doc_summary_queue.get()
+    url, doc_sents, ref_sents = doc_summary_queue.get()
     try:
       selected, score = greedy_selection(doc_sents, ref_sents, rouge)
       # print selected, score
-    except:
-      print "Greedy selection error."
+    except Exception as e:
+      print e
       continue
 
-    result = ExtSummary(doc_sents, ref_sents, selected, score)
+    result = DocSummary(url, doc_sents, ref_sents, selected, score)
     output_queue.put(result)
 
     count += 1
@@ -125,23 +115,26 @@ def generate_thread(doc_summary_queue, output_queue):
 
 
 def generate_labels(in_path, out_path, num_threads):
-  input_start = len(input_tag)
   doc_summary_queue = Queue.Queue()
   output_queue = Queue.Queue()
+  url_start = len(url_tag)
 
   with open(in_path, "r") as in_file:
-    # for l in in_file.readlines()[:100]: #TODO
+    # for l in in_file.readlines()[:10]:  #TODO
     for l in in_file.readlines():
-      input_end = l.find(output_tag)
-      input_str = l[input_start:input_end].strip().decode("utf-8")
-      input_sent_list = sent_tokenize(input_str)
-      input_sent_list = [s.encode("utf-8") for s in input_sent_list]
+      url_end = l.find(document_tag)
+      url = l[url_start:url_end].strip()
 
-      output_start = input_end + len(output_tag)
-      output_str = l[output_start:].strip()
-      output_sent_list = output_str.split(output_sent_sep)
+      doc_start = url_end + len(document_tag)
+      doc_end = l.find(summary_tag)
+      doc_str = l[doc_start:doc_end].strip()
+      doc_sent_list = re.split(re_sent_sep, doc_str)
 
-      doc_summary_queue.put((input_sent_list, output_sent_list))
+      summary_start = doc_end + len(summary_tag)
+      summary_str = l[summary_start:].strip()
+      summary_sent_list = summary_str.split(sentence_sep)
+
+      doc_summary_queue.put((url, doc_sent_list, summary_sent_list))
 
   start_time = time.time()
   generate_threads = []
@@ -178,19 +171,15 @@ def merge_labels(in_path, out_path, use_shuffle, plot):
 
   print "Computing statistics:"
   doc_sent_lens, doc_lens, sum_lens, num_ext_ids, rouges = [], [], [], [], []
-  outputs = []
 
   for d in dataset:
     # Log the lengths
-    for s in d.doc_sents:
+    for s in d.document:
       doc_sent_lens.append(len(s.split()))
-    doc_lens.append(len(d.doc_sents))
-    sum_lens.append(len(d.summary_sents))
-    num_ext_ids.append(len(d.selected_ids))
+    doc_lens.append(len(d.document))
+    sum_lens.append(len(d.summary))
+    num_ext_ids.append(len(d.extract_ids))
     rouges.append(d.rouge_2)
-    # Convert to DocSummary object
-    outputs.append(
-        DocSummary(d.doc_sents, d.summary_sents, d.selected_ids, d.rouge_2))
 
   # Print the statistics
   print "Sentence length: mean %f stddev %f" % (numpy.mean(doc_sent_lens),
@@ -214,10 +203,10 @@ def merge_labels(in_path, out_path, use_shuffle, plot):
   if use_shuffle:  # random shuffle the data points
     print "Shuffling..."
     for _ in xrange(3):
-      shuffle(outputs)
+      shuffle(dataset)
 
   with open(out_path, 'w') as f:
-    pkl.dump(outputs, f)
+    pkl.dump(dataset, f)
     print "Merged labels written to %s" % out_path
 
 
