@@ -23,6 +23,8 @@ paragraph_sep = "</p>"
 sentence_sep = "</s>"
 re_sent_sep = sentence_sep + "|" + paragraph_sep
 
+ExtSummary = namedtuple('ExtSummary',
+                        'doc_sents summary_sents selected_ids rouge_2')
 DocSummary = namedtuple('DocSummary',
                         'url document summary extract_ids rouge_2')
 
@@ -172,14 +174,24 @@ def merge_labels(in_path, out_path, use_shuffle, plot):
   print "Computing statistics:"
   doc_sent_lens, doc_lens, sum_lens, num_ext_ids, rouges = [], [], [], [], []
 
-  for d in dataset:
-    # Log the lengths
-    for s in d.document:
-      doc_sent_lens.append(len(s.split()))
-    doc_lens.append(len(d.document))
-    sum_lens.append(len(d.summary))
-    num_ext_ids.append(len(d.extract_ids))
-    rouges.append(d.rouge_2)
+  # Log the lengths
+  if type(dataset[0]) == ExtSummary:
+    for d in dataset:
+      for s in d.doc_sents:
+        doc_sent_lens.append(len(s.split()))
+      doc_lens.append(len(d.doc_sents))
+      sum_lens.append(len(d.summary_sents))
+      num_ext_ids.append(len(d.selected_ids))
+      rouges.append(d.rouge_2)
+
+  elif type(dataset[0]) == DocSummary:
+    for d in dataset:
+      for s in d.document:
+        doc_sent_lens.append(len(s.split()))
+      doc_lens.append(len(d.document))
+      sum_lens.append(len(d.summary))
+      num_ext_ids.append(len(d.extract_ids))
+      rouges.append(d.rouge_2)
 
   # Print the statistics
   print "Sentence length: mean %f stddev %f" % (numpy.mean(doc_sent_lens),
